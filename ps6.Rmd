@@ -1,0 +1,213 @@
+---
+title: "Problem Set 6"
+author: "Leah Shiferaw"
+date: "2024-04-07"
+output: 
+  pdf_document:
+    includes:
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+        eval = TRUE,
+        fig.align = 'center'
+  )
+
+library(tidyverse)
+library(patchwork)
+library(knitr)
+library(ggplot2)
+library(dplyr)
+library(scales)
+library(lfe)
+library(stargazer)
+library(RColorBrewer)
+
+```
+
+```{r clean and selecting, echo=FALSE}
+
+covid = data.table::fread('https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties-2022.csv') |>
+    filter(!is.na(fips), state != 'Puerto Rico') |>
+    select(fips, county, state, date, deaths) |>
+    group_by(fips, county, state) |>
+    summarise(deaths = max(deaths, na.rm = T) - min(deaths, na.rm = T))
+
+mask = read_csv('https://raw.githubusercontent.com/nytimes/covid-19-data/master/mask-use/mask-use-by-county.csv') |>
+    mutate(
+      fips = as.integer(COUNTYFP),
+      always.mask = ALWAYS, 
+      .keep = 'none'
+    )  
+
+vax = read_csv('cdc vax mar1.csv') |>
+    filter(
+      FIPS != 'UNK', 
+      Recip_State != 'VI', 
+      Completeness_pct > 0, 
+      !is.na(Administered_Dose1_Recip)
+    ) |> # drop unknown/incomplete/questionable reports
+    mutate(
+      fips = as.integer(FIPS), 
+      population = Census2019,
+      vax.complete = Series_Complete_Pop_Pct, # percent vaxd
+      svi.index = SVI_CTGY, # social vulnerability index
+      .keep = 'none'
+    )  
+ 
+covid =
+    left_join(covid, mask) |>
+    left_join(vax) |>
+    mutate(deaths.scaled = deaths / population * 100000) |>
+    ungroup() # scale by population
+  
+  rm(mask, vax)
+```
+
+Overview of the data
+
+
+  The NYT Coronavirus Tracker tracks confirmed COVID-19 cases and deaths at the country, state, and county level. The goal of the data set was to give the government a comprehensive overview of COVID cases in the US to help with government response to the pandemic. The data is divided into historical and live cases in which historical files show the final counts for each day, while the live files have partial counts that may not necessarily reflect the final counts. Journalists, assistants, reporters, and college students collected the data from news sources, hospitals, health departments, among other sources. The NYT Coronavirus Tracker has additional data sets examining mask use, average of COVID cases, and cases tracked in prisons and colleges. 
+
+The data was last updated on March 26th, 2024. As of March 9th, the highest number of COVID cases in 2024 occurred on January 3rd, 2024 in which 7,793 cases were recorded.
+
+
+
+Summary of key variables
+
+
+```{r key variables, echo=FALSE}  
+
+summary(covid$deaths)
+summary(covid$always.mask)
+summary(covid$vax.complete)
+
+```
+ 
+  Deaths are represented as the confirmed deaths recorded in the data set. The lowest deaths were recorded at 0 in 58 counties. The highest COVID deaths was recorded at 7,034 in Los Angeles County, California. 
+  
+  The masking rate, which represents the percentage of individuals always wearing masks. The lowest masking rate was at 12%, which was recorded at Valley County, Montana, and the highest masking rate was recorded in Inyo County, California at 89%. The median vaccination rate stands at 50%, which shows that half of the observations fall below this value, while the average vaccination rate is slightly higher at 51%.
+  
+
+  The vaccination rates, represents the proportion of individuals vaccinated within a population. The lowest vaccination record was recorded in Slope County, North Dakota, while the highest vaccination rate was recorded at 95% in fourteen counties across the United States. The median vaccination rate stands at 52.10%, indicating that half of the observations have a rate below this value, while the mean vaccination rate was recorded at 53%. 
+  
+
+Estimated impact of mask use and vaccination on 2022 COVID deaths
+
+
+```{r covid deaths}
+
+
+covid |>
+    ggplot(aes(x = 1+deaths)) +
+    geom_histogram(fill = '#69b3a2', color = "white") +
+    scale_x_log10() + 
+    theme_minimal() + 
+  labs(
+    title = "Distribution of COVID-19 Deaths",
+    x = "Number of Deaths",  
+    y = "Frequency") +
+    theme(
+      plot.title = element_text(hjust = 0.5))
+
+```
+
+COVID deaths across the country ranged from 0 to 7,034. These deaths occured in counties with high and densely populated cities, such as Los Angeles, Phoenix, Detroit, and Chicago, among others. 
+
+```{r vax}
+
+topvax = covid |>
+    select(vax.complete, county, state) |>
+    top_n(10, vax.complete)  
+  
+  ggplot(topvax, aes(x = county, y = vax.complete)) +
+    geom_bar(stat = "identity", fill = "#D397F8") +  
+    theme_minimal() +  
+    labs(
+      title = "Top Vaccination Rates by County", 
+      x = "County",  
+      y = "Vaccination Rates"
+    ) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1)  
+    )
+```
+
+
+Vaccination rates among the top 10 counties was between 90 to 93%. These  vaccination rates were spread across the country, including counties from Montana, South Dakota, Louisiana, Maryland, North Carolina, Maine, and Utah.
+
+
+```{r mask}
+
+topmasks = covid |>
+    select(always.mask, county, state) |>
+    top_n(10, always.mask)  
+  
+  ggplot(topmasks, aes(x = county, y = always.mask)) +
+    geom_bar(stat = "identity", fill = "#7894EA") +  
+    theme_minimal() +  
+    labs(
+      title = "Top Mask Rates by County", 
+      x = "County",  
+      y = "Mask Rates"
+    ) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      plot.title = element_text(hjust = 0.5)
+    )
+```
+
+
+The overall range of the top 10 masking rates by county were between 85.7 to 95%. The rates were geographically spread, including counties in California, New York, Texas, Nevada, and Massachusetts.
+
+The top states with COVID deaths were: California, Arizona, Illinois, Florida, Nevada, Michigan, and Texas. The rates of vaccination and masking rates are as follows:
+
+
+  - Los Angeles County, California had a 75% vaccination rate and 78% masking rate. 
+  - Maricopa County, Arizona had a 61% vaccination rate and 73% always masking rate.
+  - Cook County, Illinois: 72% masking rate and 75% vax rate
+  - Miami-Dade County, Florida: 76% masking rate and 88% vax rate
+  - Clark County, Nevada: 74% masking rate and 60% vax rate
+  - Wayne County, Michigan: 55% vaccination rate and 69% always masking rate.
+  - Riverside County, California: 61% vaccination rate and 80% always masking rate.
+  - San Bernandino County, California: 60% vaccination rate and 76% always masking rate.
+  - Orange County, California: 74% vaccination rate and 75% always masking rate.
+  - Harris County, Texas: 65% vaccination rate, 73% always masking rate.
+  
+
+```{r box plots} 
+
+covid |>
+  ggplot(aes(y = vax.complete, x = svi.index, color = svi.index)) +
+  geom_boxplot(fill = "white", color = "#871F78") + 
+  theme_minimal() +
+  labs(title = "Vaccination Rates by Social Vulnerability Index") +
+  theme(plot.title = element_text(hjust = 0.5))  
+
+mods = list(
+    m1 = felm(deaths.scaled ~ always.mask + population + svi.index | state, data = covid),
+    m2 = felm(deaths.scaled ~ vax.complete + population + svi.index | state, data = covid),
+    m3 = felm(deaths.scaled ~ always.mask + vax.complete + svi.index | state, data = covid)
+  )
+
+# regression table
+  stargazer::stargazer(
+    mods,
+    keep.stat = 'n', type = 'text', # change to html in Rmd
+    add.lines = list(c('State fixed effects','Yes','Yes','Yes'))
+  )  
+```
+ 
+
+
+  The regression table shows the analysis of various factors on COVID-19 mortality rates, represented by 'deaths.scaled.' The table shows the estimated effects of several independent variables examined earlier in the report, including 'always.mask,' 'vax.complete,' and social vulnerability index categories 'svi.index' (B, C, and D). The coefficients show the expected change in COVID-19 mortality rates for a one-unit increase in each independent variable, holding other factors constant. Significance levels help assess the statistical significance of these effects. 
+ 
+ 
+ Conclusion:
+
+Masking rates range from a low of 12% in some counties to a high of 89% in others, showcasing differences in adherence to taking preventive measures against COVID. Similarly, vaccination rates vary widely, with some counties achieving rates as high as 95%. The median vaccination rate of 52.10% suggests that a significant portion of the population has received at least one dose of the vaccine.As seen in the regression table, masking and vaccination rates has an impact on COVID deaths overall.  
+
+It should be noted that population density also affect COVID rates. The cases in which the most deaths were recorded had high levels of vaccination and masking; however, these counties also had highly populated cities such as Los Angeles, Phoenix, Miami, Las Vegas, Chicago, etc. Conversely, the counties in which deaths were lowest were also sparsely populated areas.
+
+
